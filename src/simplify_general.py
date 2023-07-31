@@ -8,8 +8,9 @@ import sys
 import traceback
 import multiprocessing
 import numpy as np
-try: import z3
-except ModuleNotFoundError: pass
+import z3
+from z3 import BitVec, Or
+from z3.z3util import get_vars
 
 currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 sys.path.insert(0, os.path.join(currentdir, "utils"))
@@ -46,6 +47,10 @@ def verify_using_z3(orig, simpl, bitCount, timeout=None):
     simpl = tSimpl.to_string(False, -1, tmpVars)
 
     Y = [z3.BitVec(v, bitCount) for v in tmpVars]
+
+    # Replace > with >>
+    orig = orig.replace(">", ">>")
+    simpl = simpl.replace(">", ">>")
 
     modulus = 2**bitCount
     exprEval = eval("(" + orig + ") % " + str(modulus))
@@ -314,7 +319,7 @@ class GeneralSimplifier():
     # Returns true iff the given node can be part of a sum that can be
     # simplified.
     def __is_candidate_for_simplification_in_sum(self, node):
-        if node.type != NodeType.PRODUCT and node.type != NodeType.POWER: return False
+        if node.type != NodeType.PRODUCT and node.type != NodeType.POWER and node.type != NodeType.SHR: return False
         if node.state != NodeState.NONLINEAR: return False
 
         if len(node.children) > 2:
@@ -643,6 +648,7 @@ class GeneralSimplifier():
     def simplify(self, expr, useZ3=False):
         manager = multiprocessing.Manager()
         returnDict = manager.dict()
+
         p = multiprocessing.Process(target=self._simplify, args=(expr, returnDict))
         p.start()
         # Wait for 30 seconds or until process finishes
@@ -653,7 +659,8 @@ class GeneralSimplifier():
             print("timed out... kill process...")
 
             # Terminate - may not work if process is stuck for good
-            #p.terminate()
+            p.terminate()
+        
             # OR Kill - will work for sure, no chance for process to finish nicely however
             p.kill()
 
@@ -730,8 +737,15 @@ if __name__ == "__main__":
     if len(expressions) == 0: sys.exit("No expressions to simplify given!")
 
     for expr in expressions:
+        # replace >> with >
+        expr = expr.replace(">>", ">")
+
         print("*** Expression " + expr)
         simpl = simplify_mba(expr, bitCount, useZ3, modRed, verifBitCount)
+
+        # replace >> with >
+        # simpl = simpl.replace(">", ">>")
+
         print("*** ... simplified to " + simpl)
 
     sys.exit(0)

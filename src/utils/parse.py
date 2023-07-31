@@ -105,7 +105,7 @@ class Parser():
         return node
 
     def __parse_shift(self):
-        base = self.__parse_sum()
+        base = self.__parse_shr()
         if base == None:
             return None
 
@@ -115,7 +115,6 @@ class Parser():
             return base
 
         # We write "a << b" as "a * 2**b".
-
         prod = self.__new_node(NodeType.PRODUCT)
         prod.children.append(base)
 
@@ -140,6 +139,28 @@ class Parser():
             return None
 
         return prod
+    
+    def __parse_shr(self):        
+        child = self.__parse_sum()
+        if child == None:
+            return None
+        
+        # We have a trivial shift, no need for a dedicated node.
+        if self.__peek() != '>':
+            return child
+
+        node = self.__new_node(NodeType.SHR)
+        node.children.append(child)
+
+        while self.__peek() == '>':
+            self.__get()
+            child = self.__parse_shift()
+            if child == None:
+                return None
+
+            node.children.append(child)
+
+        return node
 
     # Parse the sum starting at current idx and in this course merge or
     # rearrange constants. Sets self.__error if an error occurs.
@@ -174,6 +195,7 @@ class Parser():
         child = self.__parse_factor()
         if child == None:
             return None
+        
         # We have a trivial product, no need for a dedicated node.
         if not self.__has_multiplicator():
             return child
@@ -454,6 +476,11 @@ class Parser():
     # operator '<<'.
     def __has_lshift(self):
         return self.__peek() == '<' and self.__peek_next() == '<'
+    
+    # Returns true iff the character at position idx initiates a right shift
+    # operator '>>'.
+    def __has_rshift(self):
+        return self.__peek() == '>' and self.__peek_next() == '>'
 
     # Returns true iff the character at position idx of expr and its succeeding
     # character indicate a binary number, i.e., are '0b'.

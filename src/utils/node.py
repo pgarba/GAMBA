@@ -3,6 +3,7 @@
 from enum import Enum
 import random
 import sys
+import math
 
 from batch import Batch, IndexWithMultitude
 
@@ -45,9 +46,10 @@ class NodeType(Enum):
     NEGATION = 3
     PRODUCT = 4
     SUM = 5
-    CONJUNCTION = 6
-    EXCL_DISJUNCTION = 7
-    INCL_DISJUNCTION = 8
+    SHR = 6
+    CONJUNCTION = 7
+    EXCL_DISJUNCTION = 8
+    INCL_DISJUNCTION = 9
 
     # Function for comparing types.
     def __lt__(self, other):
@@ -98,6 +100,7 @@ class Node():
         self.constant = 0
         self.state = NodeState.UNKNOWN
         self.__modulus = modulus
+        self.__bitcount = int(math.log(modulus, 10) / math.log(2, 10))
         self.__modRed = modRed
         self.linearEnd = 0
         self.__MAX_IT = 10
@@ -145,6 +148,15 @@ class Node():
             # of '1*'.
             if ret1 == "-1" and len(self.children) > 1 and end > 1:
                 ret = "-" + ret[3:]
+            if withParentheses: ret = "(" + ret + ")"
+            return ret
+        
+        if self.type == NodeType.SHR:
+            assert(len(self.children) == 2)
+            child1 = self.children[0]
+            child2 = self.children[1]
+            ret = child1.to_string(child1.type > NodeType.SHR, -1, varNames) + ">" + \
+                  child2.to_string(child2.type > NodeType.SHR, -1, varNames)
             if withParentheses: ret = "(" + ret + ")"
             return ret
 
@@ -288,8 +300,10 @@ class Node():
 
     # Apply the node's binary operation to the given values.
     def __apply_binop(self, x, y):
-        if self.type == NodeType.POWER: return self.__power(x, y)
+        if self.type == NodeType.POWER: 
+            return self.__power(x, y)
         if self.type == NodeType.PRODUCT: return x*y
+        if self.type == NodeType.SHR: return x>>y
         if self.type == NodeType.SUM: return x + y
         return self.__apply_bitwise_binop(x, y)
 
@@ -465,6 +479,9 @@ class Node():
         elif self.type == NodeType.PRODUCT:
             self.__inspect_constants_product()
 
+        elif self.type == NodeType.SHR:
+            self.__inspect_constants_shr()
+
         elif self.type == NodeType.NEGATION:
             self.__inspect_constants_negation()
 
@@ -639,6 +656,57 @@ class Node():
                     else:
                         self.children.remove(child)
                         self.children.insert(0, child)
+
+        if isZero:
+            self.children = []
+            self.type = NodeType.CONSTANT
+            self.constant = 0
+            return
+
+        for child in toRemove: self.children.remove(child)
+
+        first = self.children[0]
+        if len(self.children) > 1 and first.__is_constant(1): self.children.pop(0)
+        if len(self.children) == 1: self.copy(self.children[0])
+
+    def __inspect_constants_shr(self):
+        first = self.children[0]
+        isZero = first.__is_constant(0)
+
+        second = self.children[1]
+        isSecondZero = second.__is_constant(0)
+
+        if isZero:
+            self.children = []
+            self.type = NodeType.CONSTANT
+            self.constant = 0
+            return
+        
+        if isSecondZero:
+            self.children = []
+            self.copy(first)
+            return
+        
+        #if shift >= bitcount, then the result is 0
+        if second.type == NodeType.CONSTANT and second.constant >= self.__bitcount:
+            self.children = []
+            self.type = NodeType.CONSTANT
+            self.constant = 0
+            return
+
+        toRemove = []
+
+        if not isZero:
+            for child in self.children[1:]:
+                if child.type == NodeType.CONSTANT:
+                    if child.constant >= self.__bitcount:
+                        isZero = True
+                        break
+
+                    first = self.children[0]
+                    if first.type == NodeType.CONSTANT:
+                        first.__set_and_reduce_constant(first.constant >> child.constant)
+                        toRemove.append(child)
 
         if isZero:
             self.children = []
@@ -1374,7 +1442,7 @@ class Node():
 
     # Returns true iff this node is an arithmetic operation.
     def __is_arithm_op(self):
-        return self.type in [NodeType.SUM, NodeType.PRODUCT, NodeType.POWER]
+        return self.type in [NodeType.SUM, NodeType.PRODUCT, NodeType.POWER, NodeType.SHR]
 
     # Assuming that this node is a bitwise negation and its child is a product,
     # replace this node using the formula ~x = -x - 1.
@@ -6029,6 +6097,7 @@ class Node():
         elif self.type == NodeType.PRODUCT: self.__mark_linear_product()
         elif self.type == NodeType.NEGATION: self.__mark_linear_bitwise()
         elif self.type == NodeType.POWER: self.__mark_linear_power()
+        elif self.type == NodeType.SHR: self.__mark_linear_power()
         elif self.type == NodeType.VARIABLE: self.__mark_linear_variable()
         elif self.type == NodeType.CONSTANT: self.__mark_linear_constant()
 
@@ -6117,6 +6186,9 @@ class Node():
 
         # We do not perform reordering for power operator.
         if self.type == NodeType.POWER: return
+
+        # We do not perform reording for SHR operator
+        if self.type == NodeType.SHR: return
 
         if self.state != NodeState.NONLINEAR and self.state != NodeState.MIXED:
             self.linearEnd = len(self.children)
@@ -6543,6 +6615,8 @@ class Node():
     def __reorder_variables(self):
         if self.type < NodeType.PRODUCT: return
         if len(self.children) <= 1: return
+
+        if self.type == NodeType.SHR: return
 
         self.children.sort()
 
