@@ -12,6 +12,9 @@ import z3
 from z3 import BitVec, Or
 from z3.z3util import get_vars
 
+# use redis to store the results
+import redis
+
 currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 sys.path.insert(0, os.path.join(currentdir, "utils"))
 from parse import Parser, parse, Node, NodeType, NodeState
@@ -677,11 +680,37 @@ class GeneralSimplifier():
 
         return simpl if self.__check_verify(expr, root) else ""
 
+# Connect to redis db
+def connect_redis():
+    redis_host = "localhost"
+    redis_port = 6379
+    redis_password = ""
+
+    try:
+        r = redis.StrictRedis(host=redis_host, port=redis_port, password=redis_password, decode_responses=True)
+        r.ping()
+        return r
+    except Exception as e:
+        print(e)
+        sys.exit("Error: Could not connect to redis db!")
 
 # Simplify the given expression with given number of variables.
-def simplify_mba(expr, bitCount, useZ3=False, modRed=False, verifBitCount=None):
+def simplify_mba(expr, bitCount, useZ3=False, modRed=False, verifBitCount=None, useRedis=False):
+    if useRedis:
+        r = connect_redis()
+        
+        # Get expression from redis db
+        simpl = r.get(expr)
+        if simpl != None: 
+            return simpl
+
     simplifier = GeneralSimplifier(bitCount, modRed, verifBitCount)
     simpl = simplifier.simplify(expr, useZ3)
+
+    if useRedis and simpl != "":
+        # Save expression to redis db
+        r.set(expr, simpl)
+
     return simpl
 
 
@@ -695,11 +724,13 @@ def print_usage():
     print("    -z:    enable a check for valid simplification using Z3")
     print("    -m:    enable a reduction of all constants modulo 2**b where b is the bit count")
     print("    -v:    specify a bit count for verification for nonlinear input (default: no verification)")
+    print("    -r:    use redis for caching")
 
 if __name__ == "__main__":
     argc = len(sys.argv)
     bitCount = 64
     useZ3 = False
+    useRedis = False
     checkLinear = False
     modRed = False
     verifBitCount = None
@@ -723,6 +754,7 @@ if __name__ == "__main__":
 
         elif sys.argv[i] == "-z": useZ3 = True
         elif sys.argv[i] == "-m": modRed = True
+        elif sys.argv[i] == "-r": useRedis = True
 
         elif sys.argv[i] == "-v":
             i = i + 1
@@ -741,7 +773,7 @@ if __name__ == "__main__":
         expr = expr.replace(">>", ">")
 
         print("*** Expression " + expr)
-        simpl = simplify_mba(expr, bitCount, useZ3, modRed, verifBitCount)
+        simpl = simplify_mba(expr, bitCount, useZ3, modRed, verifBitCount, useRedis)
 
         # replace >> with >
         # simpl = simpl.replace(">", ">>")
