@@ -152,11 +152,11 @@ class Node():
             return ret
         
         if self.type == NodeType.SHR:
-            assert(len(self.children) == 2)
+            assert(len(self.children) > 0)
             child1 = self.children[0]
-            child2 = self.children[1]
-            ret = child1.to_string(child1.type > NodeType.SHR, -1, varNames) + ">" + \
-                  child2.to_string(child2.type > NodeType.SHR, -1, varNames)
+            ret = child1.to_string(child1.type > NodeType.SHR, -1, varNames)
+            for child in self.children[1:end]:
+                ret += ">" + child.to_string(child.type > NodeType.SHR, -1, varNames)
             if withParentheses: ret = "(" + ret + ")"
             return ret
 
@@ -303,7 +303,6 @@ class Node():
         if self.type == NodeType.POWER: 
             return self.__power(x, y)
         if self.type == NodeType.PRODUCT: return x*y
-        if self.type == NodeType.SHR: return x>>y
         if self.type == NodeType.SUM: return x + y
         return self.__apply_bitwise_binop(x, y)
 
@@ -313,6 +312,8 @@ class Node():
         if self.type == NodeType.CONJUNCTION: return x&y
         if self.type == NodeType.EXCL_DISJUNCTION: return x^y
         if self.type == NodeType.INCL_DISJUNCTION: return x|y
+        if self.type == NodeType.SHR: return x>>y
+
         assert(False) # pragma: no cover
         return 0
 
@@ -673,22 +674,7 @@ class Node():
         first = self.children[0]
         isZero = first.__is_constant(0)
 
-        second = self.children[1]
-        isSecondZero = second.__is_constant(0)
-
         if isZero:
-            self.children = []
-            self.type = NodeType.CONSTANT
-            self.constant = 0
-            return
-        
-        if isSecondZero:
-            self.children = []
-            self.copy(first)
-            return
-        
-        #if shift >= bitcount, then the result is 0
-        if second.type == NodeType.CONSTANT and second.constant >= self.__bitcount:
             self.children = []
             self.type = NodeType.CONSTANT
             self.constant = 0
@@ -696,29 +682,54 @@ class Node():
 
         toRemove = []
 
-        if not isZero:
-            for child in self.children[1:]:
-                if child.type == NodeType.CONSTANT:
-                    if child.constant >= self.__bitcount:
-                        isZero = True
-                        break
+        # Sum up all constants
+        for child in self.children[1:]:
+            if child.type == NodeType.CONSTANT:
+                if child.constant == 0:
+                    toRemove.append(child)
+                    continue
 
-                    first = self.children[0]
-                    if first.type == NodeType.CONSTANT:
-                        first.__set_and_reduce_constant(first.constant >> child.constant)
-                        toRemove.append(child)
-
-        if isZero:
-            self.children = []
-            self.type = NodeType.CONSTANT
-            self.constant = 0
-            return
+                first = self.children[0]
+                if first.type == NodeType.CONSTANT:
+                    first.__set_and_reduce_constant(first.constant >> child.constant)
+                    toRemove.append(child)
 
         for child in toRemove: self.children.remove(child)
 
-        first = self.children[0]
-        if len(self.children) > 1 and first.__is_constant(1): self.children.pop(0)
-        if len(self.children) == 1: self.copy(self.children[0])
+        # If more than one child left try to sum all constants
+        constantChild = None
+        toRemove = []
+        if len(self.children) > 1:
+            constants = []
+
+            for child in self.children[1:]:
+                if child.type == NodeType.CONSTANT:
+                    if child.constant == 0:
+                        toRemove.append(child)
+                        continue
+
+                    constants.append(child)
+                    if constantChild == None:
+                        constantChild = child
+                    else:
+                        toRemove.append(child)
+
+        if constantChild and len(constants) > 1:
+            shiftcount = constants[0].constant
+            for constant in constants[1:]:
+                shiftcount = shiftcount + constant.constant
+
+            constantChild.__set_and_reduce_constant(shiftcount)        
+
+        for child in toRemove: self.children.remove(child)           
+
+        #if shift >= bitcount, then the result is 0
+        for child in self.children:
+            if child.type == NodeType.CONSTANT and child.constant >= self.__bitcount:
+                self.children = []
+                self.type = NodeType.CONSTANT
+                self.constant = 0
+                return        
 
     # Inspect the constants of the bitwise negation whose top-level node is
     # this one. That is, get rid of double negations.
@@ -817,6 +828,7 @@ class Node():
         elif self.type == NodeType.EXCL_DISJUNCTION: self.__flatten_binary_generic()
         elif self.type == NodeType.CONJUNCTION: self.__flatten_binary_generic()
         elif self.type == NodeType.SUM: self.__flatten_binary_generic()
+        elif self.type == NodeType.SHR: self.__flatten_binary_generic()
         elif self.type == NodeType.PRODUCT: self.__flatten_product()
 
     # Flatten the binary operator node's hierarchy by merging it, if possible,
@@ -6093,11 +6105,11 @@ class Node():
         if self.type == NodeType.INCL_DISJUNCTION: self.__mark_linear_bitwise()
         elif self.type == NodeType.EXCL_DISJUNCTION: self.__mark_linear_bitwise()
         elif self.type == NodeType.CONJUNCTION: self.__mark_linear_bitwise()
+        elif self.type == NodeType.SHR: self.__mark_linear_power()
         elif self.type == NodeType.SUM: self.__mark_linear_sum()
         elif self.type == NodeType.PRODUCT: self.__mark_linear_product()
         elif self.type == NodeType.NEGATION: self.__mark_linear_bitwise()
         elif self.type == NodeType.POWER: self.__mark_linear_power()
-        elif self.type == NodeType.SHR: self.__mark_linear_power()
         elif self.type == NodeType.VARIABLE: self.__mark_linear_variable()
         elif self.type == NodeType.CONSTANT: self.__mark_linear_constant()
 
@@ -6614,9 +6626,9 @@ class Node():
     # sort them alphabetically.
     def __reorder_variables(self):
         if self.type < NodeType.PRODUCT: return
-        if len(self.children) <= 1: return
-
         if self.type == NodeType.SHR: return
+
+        if len(self.children) <= 1: return
 
         self.children.sort()
 

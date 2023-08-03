@@ -655,14 +655,14 @@ class GeneralSimplifier():
         p = multiprocessing.Process(target=self._simplify, args=(expr, returnDict))
         p.start()
         # Wait for 30 seconds or until process finishes
-        p.join(30)
+        p.join(60)
 
         # If thread is still active
         if p.is_alive():
             print("timed out... kill process...")
 
             # Terminate - may not work if process is stuck for good
-            p.terminate()
+            # p.terminate()
         
             # OR Kill - will work for sure, no chance for process to finish nicely however
             p.kill()
@@ -724,7 +724,7 @@ def print_usage():
     print("    -z:    enable a check for valid simplification using Z3")
     print("    -m:    enable a reduction of all constants modulo 2**b where b is the bit count")
     print("    -v:    specify a bit count for verification for nonlinear input (default: no verification)")
-    print("    -r:    use redis for caching")
+    print("    -r:    use redis for caching (default: no caching)")
 
 if __name__ == "__main__":
     argc = len(sys.argv)

@@ -154,7 +154,7 @@ class Parser():
 
         while self.__peek() == '>':
             self.__get()
-            child = self.__parse_shift()
+            child = self.__parse_sum()
             if child == None:
                 return None
 
