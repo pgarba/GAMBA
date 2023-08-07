@@ -724,7 +724,7 @@ class Node():
         for child in toRemove: self.children.remove(child)           
 
         #if shift >= bitcount, then the result is 0
-        for child in self.children:
+        for child in self.children[1:]:
             if child.type == NodeType.CONSTANT and child.constant >= self.__bitcount:
                 self.children = []
                 self.type = NodeType.CONSTANT
